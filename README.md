@@ -150,3 +150,6 @@ wrangler d1 create sullyos-amsg     # 拿 database_id 填进 wrangler.toml
 wrangler secret put AMSG_MASTER_KEY # 其余密钥同理
 wrangler deploy
 ```
+
+
+<!-- Cloudflare deployment trigger -->
