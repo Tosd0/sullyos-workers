@@ -140,7 +140,7 @@ SullyOS 里点「连接并验证」时也会先读一次这个自检，缺什么
 这个地址是只读的，也不需要密钥，但它**不会**返回任何密钥的值、你的用户标识或消息内容——贴出来是安全的。
 
 **主动消息到点了没反应？**
-`amsg/` 靠定时触发器每分钟检查一次，配置里已经写好了（`crons = ["* * * * *"]`）。去 Worker 的 **Settings → Trigger events** 确认 Cron 那条在；不在的话通常是 Path 填错、部署的不是 `amsg` 目录。
+`amsg/` 靠定时触发器每分钟检查一次，配置里已经写好了（`crons = ["* * * * *"]`）。去 Worker 的 **Settings → Trigger events** 确认 Cron 那条在；不在的话通常是 Path 填错、部署的不是 `amsg` 目录。 
 
 **想用 wrangler 命令行而不是网页？**
 
@@ -150,3 +150,6 @@ wrangler d1 create sullyos-amsg     # 拿 database_id 填进 wrangler.toml
 wrangler secret put AMSG_MASTER_KEY # 其余密钥同理
 wrangler deploy
 ```
+
+
+<!-- Cloudflare deployment trigger -->
