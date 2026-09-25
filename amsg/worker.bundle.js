@@ -7629,7 +7629,7 @@ function createSingleUserCloudflareWorker(buildConfig, options = {}) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-09-25.2";
+var AMSG_BUNDLE_VERSION = "2026-09-25.3";
 
 // utils/amsgTaskKinds.ts
 var AMSG_TASK_KIND_KEY = "amsgKind";
@@ -9788,6 +9788,9 @@ var handleInstantChat = async (args) => {
   if (!isEncryptedEnvelope2(body.taskPayload)) {
     return fail3(400, "INVALID_TASK_PAYLOAD", "taskPayload \u5FC5\u987B\u662F\u52A0\u5BC6\u4FE1\u5C01\uFF08iv / authTag / encryptedData\uFF09");
   }
+  if (body.credPayload !== void 0 && !isEncryptedEnvelope2(body.credPayload)) {
+    return fail3(400, "INVALID_CRED_PAYLOAD", "credPayload \u5FC5\u987B\u662F\u52A0\u5BC6\u4FE1\u5C01\uFF08iv / authTag / encryptedData\uFF09");
+  }
   const requestUrl = new URL(request.url);
   const mountPath = requestUrl.pathname.replace(/\/+$/, "").replace(/\/instant-chat$/, "");
   const internalUrl = (path) => {
@@ -9810,26 +9813,34 @@ var handleInstantChat = async (args) => {
       return null;
     }
   };
-  let stateResponse;
-  let stateBody = null;
-  let stateCause = null;
-  for (let attempt = 0; attempt < stateBackoffMs.length; attempt += 1) {
-    if (attempt > 0) {
-      console.warn(`[amsg:instant-chat] \u4E91\u7AEF\u72B6\u6001\u7B2C ${attempt} \u6B21\u6CA1\u5199\u8FDB\u53BB\uFF08${stateCause ?? stateResponse.status}\uFF09\uFF0C\u91CD\u8BD5`);
-      await sleep(stateBackoffMs[attempt]);
+  const forwardIdempotentPut = async (path, envelope, label) => {
+    let response;
+    let responseBody = null;
+    let cause = null;
+    for (let attempt = 0; attempt < stateBackoffMs.length; attempt += 1) {
+      if (attempt > 0) {
+        console.warn(`[amsg:instant-chat] ${label}\u7B2C ${attempt} \u6B21\u6CA1\u5199\u8FDB\u53BB\uFF08${cause ?? response.status}\uFF09\uFF0C\u91CD\u8BD5`);
+        await sleep(stateBackoffMs[attempt]);
+      }
+      response = await upstream2.fetch(
+        new Request(internalUrl(path), {
+          method: "PUT",
+          headers: encryptedHeaders,
+          body: JSON.stringify(envelope)
+        }),
+        env
+      );
+      responseBody = await readBody(response);
+      cause = readUpstreamCause(response.status, responseBody);
+      if (response.status < 500) break;
     }
-    stateResponse = await upstream2.fetch(
-      new Request(internalUrl("/client-state"), {
-        method: "PUT",
-        headers: encryptedHeaders,
-        body: JSON.stringify(body.statePayload)
-      }),
-      env
-    );
-    stateBody = await readBody(stateResponse);
-    stateCause = readUpstreamCause(stateResponse.status, stateBody);
-    if (stateResponse.status < 500) break;
-  }
+    return { response, body: responseBody, cause };
+  };
+  const {
+    response: stateResponse,
+    body: stateBody,
+    cause: stateCause
+  } = await forwardIdempotentPut("/client-state", body.statePayload, "\u4E91\u7AEF\u72B6\u6001");
   if (!stateResponse.ok) {
     return json(stateResponse.status, {
       success: false,
@@ -9852,6 +9863,26 @@ var handleInstantChat = async (args) => {
         step: "client-state"
       }
     });
+  }
+  const credPayload = body.credPayload;
+  if (credPayload !== void 0) {
+    const {
+      response: credResponse,
+      body: credBody,
+      cause: credCause
+    } = await forwardIdempotentPut("/llm-credentials", credPayload, "LLM \u51ED\u636E");
+    if (!credResponse.ok || credBody?.success === false) {
+      return json(credResponse.ok ? 502 : credResponse.status, {
+        success: false,
+        error: {
+          code: "INSTANT_CHAT_CREDENTIALS_FAILED",
+          message: "\u8FD9\u4E00\u8F6E\u7684 API \u51ED\u636E\u6CA1\u4F20\u4E0A\u53BB\uFF0C\u8FD9\u6761\u6CA1\u53D1\u51FA\u53BB",
+          step: "llm-credentials",
+          upstream: credBody,
+          ...credCause ? { upstreamLog: credCause } : {}
+        }
+      });
+    }
   }
   const taskResponse = await upstream2.fetch(
     new Request(internalUrl("/schedule-message"), {
@@ -9897,7 +9928,11 @@ var handleInstantChat = async (args) => {
   if (!kicked.ok) {
     console.warn("[amsg:instant-chat] \u53EB\u9192 DO \u5931\u8D25\uFF08\u7B49 cron \u515C\u5E95\uFF09", kicked.error);
   }
-  return json(202, { status: "accepted", uuid });
+  return json(202, {
+    status: "accepted",
+    uuid,
+    ...credPayload !== void 0 ? { credentialsSynced: true } : {}
+  });
 };
 
 // worker/amsg/src/selfUpdate.ts
