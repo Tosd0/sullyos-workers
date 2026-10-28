@@ -14356,6 +14356,24 @@ var postCore = async (target, session, body, timeoutMs, expectResponse = true) =
     target.signal?.removeEventListener("abort", abort);
   }
 };
+var formatMcpRpcError = (err6) => {
+  const code = err6?.code !== void 0 ? `[${err6.code}]: ` : "";
+  const message = err6?.message || "\u672A\u77E5\u9519\u8BEF";
+  let dataText = "";
+  if (err6?.data !== void 0 && err6?.data !== null && err6?.data !== "") {
+    if (typeof err6.data === "string") {
+      dataText = err6.data.trim();
+    } else {
+      try {
+        dataText = JSON.stringify(err6.data);
+      } catch {
+        dataText = String(err6.data);
+      }
+    }
+  }
+  const suffix = dataText && !message.includes(dataText) ? `\uFF08${dataText}\uFF09` : "";
+  return `${code}${message}${suffix}`;
+};
 var initializeCore = async (target, session, timeoutMs) => {
   const initReq = buildRpcRequest(session, "initialize", {
     protocolVersion: MCP_LATEST_HANDSHAKE_PROTOCOL_VERSION,
@@ -14363,7 +14381,7 @@ var initializeCore = async (target, session, timeoutMs) => {
     clientInfo: { name: "sullyos", title: "SullyOS", version: "1.0.0" }
   });
   const { response } = await postCore(target, session, initReq, timeoutMs);
-  if (response?.error) throw new Error(`Initialize \u5931\u8D25: ${response.error.message}`);
+  if (response?.error) throw new Error(`Initialize \u5931\u8D25 ${formatMcpRpcError(response.error)}`);
   const negotiated = String(
     response?.result?.protocolVersion || MCP_LATEST_HANDSHAKE_PROTOCOL_VERSION
   );
@@ -14509,7 +14527,7 @@ var callMcpToolCore = async (target, session, toolName, args = {}, opts = {}) =>
       }
     }
     if (!response) return finish({ success: false, error: "\u7A7A\u54CD\u5E94" });
-    if (response.error) return finish({ success: false, error: `MCP \u9519\u8BEF [${response.error.code}]: ${response.error.message}` });
+    if (response.error) return finish({ success: false, error: `MCP \u9519\u8BEF ${formatMcpRpcError(response.error)}` });
     const result = response.result;
     if (result?.resultType === "input_required") {
       return finish({
