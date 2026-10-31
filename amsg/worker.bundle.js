@@ -2,7 +2,7 @@
 
 // worker/amsg/src/instantInput.ts
 var INSTANT_INPUT_NAMESPACE = "amsg:instant-input";
-var INSTANT_INPUT_TTL_DAYS = 30;
+var INSTANT_INPUT_TTL_DAYS = 7;
 var parseInstantInputRef = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const ref = value;
@@ -11723,7 +11723,7 @@ function stripReasoningTags2(content) {
 }
 
 // utils/amsgBundleVersion.ts
-var AMSG_BUNDLE_VERSION = "2026-10-29";
+var AMSG_BUNDLE_VERSION = "2026-10-31";
 
 // utils/amsgTaskKinds.ts
 var AMSG_TASK_KIND_KEY = "amsgKind";
