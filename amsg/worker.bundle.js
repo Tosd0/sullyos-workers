@@ -352,7 +352,7 @@ function cleanCharacterWeatherCities(value) {
   return Object.fromEntries(Object.entries(value).filter(([id, city]) => id && typeof city === "string" && city.trim()).map(([id, city]) => [id, city.trim().slice(0, 100)]));
 }
 function weatherForCharacter(config, charId) {
-  const city = charId && Object.hasOwn(config.weatherCities || {}, charId) ? config.weatherCities?.[charId] : void 0;
+  const city = charId && Object.prototype.hasOwnProperty.call(config.weatherCities || {}, charId) ? config.weatherCities?.[charId] : void 0;
   return typeof city === "string" && city.trim() ? { ...config, weatherCity: city.trim().slice(0, 100) } : config;
 }
 
