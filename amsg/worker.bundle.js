@@ -327,6 +327,45 @@ function installAnthropicFetch(browser = false) {
   globalThis.fetch = wrapped;
 }
 
+// utils/monthlyRecall.ts
+var isMonthlyRecallEnabled = (char) => char.monthlyRecallEnabled !== false;
+var stripDisabledMonthlyRecall = (text2, char) => isMonthlyRecallEnabled(char) ? text2 : text2.replace(/\[\[RECALL:[^\]]*\]\]/gi, "").trim();
+
+// utils/amsgApiCallRecords.ts
+var INSTANT_API_CALLS_RESULT_KIND = "instant-api-calls";
+var count = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+function modelCallCauses(names) {
+  return [...new Set(names.map((name) => {
+    if (name === "recall") return "recall";
+    if (["schedule_active_message", "cancel_active_message", "renew_active_message", "list_active_messages"].includes(name)) return "schedule";
+    if (name === "web_search") return "search";
+    if (["notion_read_diary", "feishu_read_diary"].includes(name)) return "diary";
+    if (name === "read_note") return "notes";
+    if (name.startsWith("xhs_")) return "xhs";
+    if (name.startsWith("mcp__")) return "mcp";
+    return "tools";
+  }))];
+}
+function makeModelCall(input) {
+  const response = input.response;
+  const usage = input.usage ?? response?.usage ?? response?.usageMetadata;
+  const promptTokens = count(usage?.prompt_tokens ?? usage?.input_tokens ?? usage?.promptTokenCount);
+  const completionTokens = count(usage?.completion_tokens ?? usage?.output_tokens ?? usage?.candidatesTokenCount);
+  return {
+    index: input.index,
+    completedAt: input.completedAt,
+    causes: input.causes,
+    ok: input.ok,
+    ...input.status !== void 0 ? { status: input.status } : {},
+    promptTokens,
+    completionTokens,
+    totalTokens: count(usage?.total_tokens ?? usage?.totalTokenCount) ?? (promptTokens !== void 0 && completionTokens !== void 0 ? promptTokens + completionTokens : void 0),
+    cacheReadTokens: count(usage?.prompt_tokens_details?.cached_tokens ?? usage?.cache_read_input_tokens ?? usage?.cachedContentTokenCount),
+    cacheWriteTokens: count(usage?.cache_creation_input_tokens ?? usage?.prompt_tokens_details?.cache_write_tokens),
+    ...typeof response?.model === "string" && response.model ? { backendModel: response.model.slice(0, 200) } : {}
+  };
+}
+
 // utils/amsgReproduction.ts
 var DIAGNOSTIC_NAMESPACE = "amsg:diagnostic";
 var DIAGNOSTIC_CHAR_ID = "amsg-diagnostic";
@@ -3950,17 +3989,17 @@ async function resolveClientStateEntries(rows, fetchChunkRows, decryptValue, onU
   };
   const entries = [];
   for (const row of rows) {
-    const count = parseChunkedRootCount(row.value);
+    const count2 = parseChunkedRootCount(row.value);
     let valueSources = [row.value];
-    if (count !== null) {
+    if (count2 !== null) {
       const map = await loadChunks();
       const chunkRows = [];
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < count2; i++) {
         const chunk = map.get(chunkKeyFor(row.key, i));
         if (!chunk || chunk.updated_at !== row.updated_at) break;
         chunkRows.push(chunk);
       }
-      if (chunkRows.length !== count) continue;
+      if (chunkRows.length !== count2) continue;
       valueSources = chunkRows.map((chunk) => chunk.value);
     }
     let value;
@@ -10527,8 +10566,8 @@ async function buildCloudDataInventory({
     let value, unreadable = metadataInfo.unreadable;
     try {
       const rootMarker = row.value ?? row.value_prefix ?? "";
-      const count = parseChunkedRootCount(rootMarker);
-      if (count === null) {
+      const count2 = parseChunkedRootCount(rootMarker);
+      if (count2 === null) {
         if (typeof row.value === "string" && (!skipFullDecrypt || row.value.length <= 1024)) {
           value = await decryptFromStorage(row.value, userKey);
         } else if (skipFullDecrypt) {
@@ -10549,12 +10588,12 @@ async function buildCloudDataInventory({
           value = await decryptFromStorage(rawValue, userKey);
         }
       } else {
-        if (count > slices.length) throw new Error("Missing state chunks");
+        if (count2 > slices.length) throw new Error("Missing state chunks");
         const sliceByKey = new Map(
           slices.map((candidate) => [candidate.key, candidate])
         );
         const orderedSlices = [];
-        for (let i = 0; i < count; i++) {
+        for (let i = 0; i < count2; i++) {
           const slice = sliceByKey.get(chunkKeyFor(row.key, i));
           if (!slice || slice.updated_at !== row.updated_at)
             throw new Error("Mismatched state chunks");
@@ -10992,9 +11031,9 @@ async function advanceCleanup(ctx, db, userId, key, operation, { maxEntries = 25
       }
       operation.knownResourceIds = [...known];
       operation.cursor = 0;
-      for (const count of operation.counts)
-        count.remaining = operation.entries.filter(
-          (entry) => entry.resource.type === count.type
+      for (const count2 of operation.counts)
+        count2.remaining = operation.entries.filter(
+          (entry) => entry.resource.type === count2.type
         ).length;
       await save(db, userId, key, "operation", operation, { leaseToken });
     }
@@ -11026,11 +11065,11 @@ async function advanceCleanup(ctx, db, userId, key, operation, { maxEntries = 25
           "\u8D44\u6E90\u5728\u6267\u884C\u524D\u53D8\u5316\uFF0C\u5DF2\u505C\u6B62\u6E05\u7406",
           409
         );
-      const count = operation.counts.find(
+      const count2 = operation.counts.find(
         (c) => c.type === entry.resource.type
       );
-      count.deleted++;
-      count.remaining = Math.max(0, count.remaining - 1);
+      count2.deleted++;
+      count2.remaining = Math.max(0, count2.remaining - 1);
       delete entry.locator;
       operation.cursor++;
       operation.updatedAt = Date.now();
@@ -11048,9 +11087,9 @@ async function advanceCleanup(ctx, db, userId, key, operation, { maxEntries = 25
     const remaining = current.entries.filter(
       (e) => operation.mode === "retire-owner" ? ownerEquals(e.resource.owner, operation.owner) || knownIds.has(e.resource.id) : selected.has(e.resource.id)
     );
-    for (const count of operation.counts)
-      count.remaining = remaining.filter(
-        (e) => e.resource.type === count.type
+    for (const count2 of operation.counts)
+      count2.remaining = remaining.filter(
+        (e) => e.resource.type === count2.type
       ).length;
     if (operation.mode === "purge") {
       const processed = new Set(
@@ -11090,7 +11129,7 @@ async function advanceCleanup(ctx, db, userId, key, operation, { maxEntries = 25
     ];
     operation.nextAttemptAt = Date.now() + Math.min(36e5, 3e4 * 2 ** operation.attempts);
     if (terminal)
-      for (const count of operation.counts) count.failed = count.remaining;
+      for (const count2 of operation.counts) count2.failed = count2.remaining;
   } finally {
     if (!leaseLost) {
       operation.updatedAt = Date.now();
@@ -18046,6 +18085,7 @@ function resolveXhsConfig(char, realtimeConfig) {
 async function runRecall(args, ctx) {
   const { char } = ctx;
   const targetMonth = `${args.year}-${args.month.padStart(2, "0")}`;
+  if (char.monthlyRecallEnabled === false) return { ok: false, reason: "disabled", yearMonth: targetMonth };
   const alreadyActive = !!char.activeMemoryMonths?.includes(targetMonth);
   if (alreadyActive) {
     return { ok: true, alreadyActive: true, yearMonth: targetMonth, logsText: null };
@@ -19131,6 +19171,7 @@ var buildToolCtx = (pack, config) => {
     name: pack.charName,
     xhsEnabled: pack.xhsEnabled,
     activeMemoryMonths: pack.activeMemoryMonths,
+    monthlyRecallEnabled: pack.monthlyRecallEnabled,
     memories: pack.memories
   };
   return {
@@ -19374,6 +19415,35 @@ var amsgFireSettled = async (info) => {
   if (cancelled) stash.selfLogTexts = null;
   const committed = !cancelled && (info.outboxed === true || stash.actionResultCommitted === true);
   const delivered = committed || (info.sentCount ?? 0) > 0;
+  if (stash.instant && stash.taskUuid && !committed && !stash.modelCallsReceiptSent) {
+    const calls = stash.modelCalls ?? (stash.modelCalls = []);
+    const attempted = typeof info.llmCalls === "number" && Number.isInteger(info.llmCalls) ? Math.min(info.llmCalls, 32) : calls.length;
+    while (calls.length < attempted) {
+      const status = info.error?.llmStatus;
+      calls.push(makeModelCall({
+        index: calls.length + 1,
+        completedAt: Date.now(),
+        causes: stash.nextCallCauses ?? [],
+        ok: false,
+        ...typeof status === "number" ? { status } : {}
+      }));
+    }
+    if (calls.length && info.emitResult) {
+      try {
+        await info.emitResult({
+          resultKind: INSTANT_API_CALLS_RESULT_KIND,
+          charId: stash.charId,
+          charName: stash.toolCtx.char.name,
+          taskUuid: stash.taskUuid,
+          calls,
+          notification: { show: false }
+        });
+        stash.modelCallsReceiptSent = true;
+      } catch (error) {
+        console.warn("[amsg:usage] \u9010\u6B21\u8C03\u7528\u8BB0\u5F55\u5199\u5165\u7ED3\u679C\u7BB1\u5931\u8D25", error);
+      }
+    }
+  }
   const stateWrites = [];
   if (!stash.instant && !stash.dailyCounted) {
     stash.dailyCounted = true;
@@ -19547,7 +19617,7 @@ var condenseToolTrace = (calls) => {
     if (call.ran === false) continue;
     counts.set(call.name, (counts.get(call.name) ?? 0) + 1);
   }
-  return [...counts].map(([name, count]) => ({ name, count }));
+  return [...counts].map(([name, count2]) => ({ name, count: count2 }));
 };
 var EMOTION_EVAL_LATE_REASON = "\u60C5\u7EEA\u8BC4\u4F30\u6CA1\u8D76\u4E0A\u8FD9\u6761\u56DE\u590D\uFF08\u526F API \u592A\u6162\uFF09\uFF0C\u8FD9\u4E00\u8F6E\u5148\u4E0D\u66F4\u65B0";
 var raceEmotionEval = (promise, lateNote = "\u8BC4\u4F30\u6CA1\u8D76\u4E0A\u8FD9\u6761\u56DE\u590D\uFF0C\u5148\u628A\u8BDD\u53D1\u51FA\u53BB\uFF08\u8FD9\u4E00\u8F6E\u4E0D\u66F4\u65B0\u60C5\u7EEA\uFF09") => {
@@ -20271,7 +20341,7 @@ ${buildReplyScopeRule(instant ? "user" : "scheduled")}
 ` : "";
     stash.fireToolNames = new Set(fireTools.map((t) => t?.function?.name).filter((n) => typeof n === "string" && !n.startsWith(MCP_FIRE_NAME_PREFIX)));
     stash.allowedToolNames = /* @__PURE__ */ new Set([
-      ...DATA_TOOL_NAMES,
+      ...DATA_TOOL_NAMES.filter((name) => name !== "recall" || isMonthlyRecallEnabled(stash.toolCtx.char)),
       ...mcpResolve ? [...mcpResolve.keys()].map((name) => `${MCP_FIRE_NAME_PREFIX}${name}`) : [],
       ...canSelfSchedule ? [AMSG_FIRE_SCHEDULE_TOOL] : [],
       ...canManageTasks ? [AMSG_FIRE_CANCEL_TOOL, AMSG_FIRE_RENEW_TOOL] : []
@@ -20387,6 +20457,17 @@ ${userHoliday}` });
     const session = stash.session;
     stash.llmRounds = (stash.llmRounds ?? 0) + 1;
     const roundRawUsage = ctx.usage ?? ctx.llmResponse?.usage;
+    if (stash.instant) {
+      const calls = stash.modelCalls ?? (stash.modelCalls = []);
+      calls.push(makeModelCall({
+        index: calls.length + 1,
+        completedAt: Date.now(),
+        causes: stash.nextCallCauses ?? [],
+        ok: true,
+        usage: roundRawUsage,
+        response: ctx.llmResponse
+      }));
+    }
     if (roundRawUsage && typeof roundRawUsage === "object") {
       const pt = typeof roundRawUsage.prompt_tokens === "number" && Number.isFinite(roundRawUsage.prompt_tokens) ? roundRawUsage.prompt_tokens : void 0;
       const ct = typeof roundRawUsage.completion_tokens === "number" && Number.isFinite(roundRawUsage.completion_tokens) ? roundRawUsage.completion_tokens : void 0;
@@ -20409,7 +20490,7 @@ ${userHoliday}` });
     }
     let decision = processLLMRound(
       session,
-      content,
+      stripDisabledMonthlyRecall(content, stash.toolCtx.char),
       {
         // 名字取 tool_pack 里的那份：它跟着每轮聊天重新上云，改名当天就是新的。
         // ctx.contactName 是排程那一刻冻进任务行的快照，用户改完名字之后，之前排的
@@ -20445,6 +20526,7 @@ ${userHoliday}` });
       stash.maxToolIterations
     );
     if (decision.decision === "tool-request") {
+      stash.nextCallCauses = modelCallCauses(decision.toolCalls.map((tc) => tc.function.name));
       console.log("[amsg:agentic]", {
         type: "tool_request",
         sessionId: ctx.sessionId,
@@ -20500,6 +20582,7 @@ ${userHoliday}` });
         ...stripSarSnapshot(stripEmotionEvalSpec(ctx.metadata)),
         ...decision.sideEffects,
         amsgOccurrenceMs: stash.occurrenceMs,
+        ...stash.instant && stash.modelCalls?.length ? { amsgModelCalls: stash.modelCalls } : {},
         ...stash.scheduledTasks.length ? { amsgSelfScheduled: stash.scheduledTasks } : {},
         ...stash.cancelledTasks.length || stash.renewedTasks.length ? {
           amsgTaskMutations: { cancelled: stash.cancelledTasks, renewed: stash.renewedTasks }
@@ -20627,6 +20710,7 @@ ${userHoliday}` });
       }
       if (stash.instant && payloads.length > 0) {
         const lastMeta = {};
+        if (stash.modelCalls?.length) lastMeta.amsgModelCalls = stash.modelCalls;
         const toolTrace = condenseToolTrace(session.toolCalls);
         if (toolTrace.length > 0) lastMeta.amsgToolTrace = toolTrace;
         const stashUsage = readStashUsage(stash);
