@@ -886,7 +886,40 @@ var amsgXhsSessionKey = (clientTaskId) => `xhs_session:${clientTaskId}`;
 var AMSG2_INSTANT_STUB_TEMPLATE = "AMSG2_INSTANT_STUB_TEMPLATE\uFF08\u5373\u65F6\u5BF9\u8BDD\u8F7B\u91CF\u5305\uFF1A\u8BE5\u89D2\u8272\u65E0\u5B9A\u65F6\u4EFB\u52A1\uFF0C\u6A21\u677F\u672A\u968F\u53D1\u9001\u91CD\u5EFA\uFF1B\u770B\u5230\u8FD9\u6761\u6B63\u6587\u8BF4\u660E\u6709\u672C\u4E0D\u8BE5\u6E32\u67D3\u6A21\u677F\u7684 fire \u5728\u6E32\u67D3\u5B83\uFF09";
 var AMSG_CHAT_FAIL_KEY = "chat_fail";
 var GZIP_VALUE_PREFIX = "gz1:";
-var canCompress = () => typeof CompressionStream === "function" && typeof DecompressionStream === "function";
+var GZIP_MIN_FRAME_BYTES = 20;
+var MIN_WORTH_PACKING_BYTES = 32;
+var brokenCompressionStreamCtor = null;
+var gzipFallbackCompressor = null;
+var crc32Table = null;
+var getCrc32Table = () => {
+  if (crc32Table) return crc32Table;
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 3988292384 ^ c >>> 1 : c >>> 1;
+    }
+    table[i] = c >>> 0;
+  }
+  crc32Table = table;
+  return table;
+};
+var computeCrc32 = (bytes) => {
+  const table = getCrc32Table();
+  let crc = 4294967295;
+  for (let i = 0; i < bytes.byteLength; i += 1) {
+    crc = table[(crc ^ bytes[i]) & 255] ^ crc >>> 8;
+  }
+  return (crc ^ 4294967295) >>> 0;
+};
+var isValidGzipForInput = (rawBytes, gz) => {
+  if (gz.byteLength < GZIP_MIN_FRAME_BYTES) return false;
+  if (gz[0] !== 31 || gz[1] !== 139 || gz[2] !== 8) return false;
+  const view = new DataView(gz.buffer, gz.byteOffset, gz.byteLength);
+  const expectedSize = rawBytes.byteLength >>> 0;
+  if (view.getUint32(gz.byteLength - 4, true) !== expectedSize) return false;
+  return view.getUint32(gz.byteLength - 8, true) === computeCrc32(rawBytes);
+};
 var CHUNK = 32768;
 var bytesToBase64 = (bytes) => {
   let binary = "";
@@ -902,14 +935,52 @@ var base64ToBytes = (base64) => {
   return bytes;
 };
 var streamThrough = async (data, transform) => {
-  const stream = new Blob([data]).stream().pipeThrough(transform);
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const readablePromise = new Response(transform.readable).arrayBuffer();
+  const writer = transform.writable.getWriter();
+  const writePromise = writer.write(data.slice()).then(() => writer.close()).catch(async (error) => {
+    try {
+      await writer.abort(error);
+    } catch {
+    }
+    throw error;
+  });
+  const [buffer] = await Promise.all([readablePromise, writePromise]);
+  return new Uint8Array(buffer);
+};
+var compressGzipBytes = async (rawBytes) => {
+  if (typeof CompressionStream === "function" && CompressionStream !== brokenCompressionStreamCtor) {
+    const ctor = CompressionStream;
+    try {
+      const gz = await streamThrough(rawBytes, new CompressionStream("gzip"));
+      if (isValidGzipForInput(rawBytes, gz)) {
+        return gz;
+      }
+      brokenCompressionStreamCtor = ctor;
+      console.warn("[AmsgGzip] \u539F\u751F CompressionStream \u8F93\u51FA\u7684 gzip \u5934\u5C3E\u4E0D\u5B8C\u6574\uFF0C\u5207\u6362\u5907\u7528\u538B\u7F29\u901A\u9053");
+    } catch (error) {
+      brokenCompressionStreamCtor = ctor;
+      console.warn("[AmsgGzip] \u539F\u751F CompressionStream \u538B\u7F29\u5931\u8D25\uFF0C\u5207\u6362\u5907\u7528\u538B\u7F29\u901A\u9053", error);
+    }
+  }
+  if (gzipFallbackCompressor) {
+    try {
+      const fallbackGz = await gzipFallbackCompressor(rawBytes);
+      if (fallbackGz && isValidGzipForInput(rawBytes, fallbackGz)) {
+        return fallbackGz;
+      }
+    } catch {
+    }
+  }
+  return null;
 };
 var packStateValue = async (json) => {
-  if (!canCompress()) return json;
+  const nativeAvailable = typeof CompressionStream === "function" && CompressionStream !== brokenCompressionStreamCtor;
+  if (!nativeAvailable && !gzipFallbackCompressor) return json;
   try {
     const rawBytes = new TextEncoder().encode(json);
-    const gz = await streamThrough(rawBytes, new CompressionStream("gzip"));
+    if (rawBytes.byteLength <= MIN_WORTH_PACKING_BYTES) return json;
+    const gz = await compressGzipBytes(rawBytes);
+    if (!gz) return json;
     const packed = `${GZIP_VALUE_PREFIX}${bytesToBase64(gz)}`;
     return packed.length < rawBytes.length ? packed : json;
   } catch {
