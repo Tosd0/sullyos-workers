@@ -17230,6 +17230,10 @@ var feishuGetDiaryByDate = async (appId, appSecret, baseId, tableId, characterNa
   }
 };
 
+// utils/appVersion.ts
+var APP_VERSION = "v3.17 (Mainland Relay)";
+var APP_VERSION_TAG = APP_VERSION.split(" ")[0];
+
 // utils/networkFailureDiagnosis.ts
 var readError = (error) => {
   if (error instanceof Error) return { name: error.name || "Error", message: error.message || String(error) };
@@ -17254,8 +17258,10 @@ var parseTargetUrl = (url, base) => {
 var isLoopbackHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
 var classifyFetchFailure = (ctx) => {
   const { name, message } = readError(ctx.error);
-  if (name === "TimeoutError" || /timed?\s?out|timeout/i.test(message)) return "timeout";
-  if (name === "AbortError" || /aborted|abort/i.test(message)) return "aborted";
+  const isTimeout = name === "TimeoutError" || /timed?\s?out|timeout/i.test(message);
+  if (!isTimeout && (name === "AbortError" || /aborted|abort/i.test(message))) return "aborted";
+  if (ctx.responseHeadersReceived) return "stream-interrupted";
+  if (isTimeout) return "timeout";
   const target = parseTargetUrl(ctx.url);
   if (!target.ok) return "bad-url";
   const pageProtocol = ctx.pageProtocol ?? (typeof location !== "undefined" ? location.protocol : "");
