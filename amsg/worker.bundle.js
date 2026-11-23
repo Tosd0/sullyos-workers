@@ -16341,7 +16341,7 @@ var handleInstantChat = async (args) => {
 // utils/amsgSelfUpdateState.ts
 var parseAmsgBundleChannel = (raw) => raw === "stable" || raw === "canary" ? raw : null;
 var findCfTokenRejection = (text2) => /\d+: invalid (access|api) token/i.exec(text2)?.[0] ?? null;
-var cfTokenRejectedMessage = (detail, hasAccountId) => `Cloudflare \u4E0D\u8BA4\u8FD9\u679A CF_API_TOKEN\uFF08${detail}\uFF09\uFF0C\u591A\u534A\u5DF2\u7ECF\u8FC7\u671F\u6216\u88AB\u5220\u4E86\u3002\u53BB Cloudflare \u65B0\u5EFA\u4E00\u679A\uFF08\u53EA\u52FE Workers Scripts \u2192 Edit\uFF09\uFF0C\u66FF\u6362 Worker \u91CC\u7684 CF_API_TOKEN\u3002` + (hasAccountId ? "" : "\u5982\u679C\u5B83\u662F cfat_ \u5F00\u5934\u7684\u8D26\u53F7\u4EE4\u724C\uFF0C\u6362\u6210\u666E\u901A API Token\uFF0C\u6216\u8005\u7ED9 Worker \u52A0\u4E00\u6761 CF_ACCOUNT_ID\u3002");
+var cfTokenRejectedMessage = (detail, hasAccountId) => `Cloudflare \u4E0D\u8BA4\u8FD9\u679A CF_API_TOKEN\uFF08${detail}\uFF09\uFF0C\u591A\u534A\u5DF2\u7ECF\u8FC7\u671F\u6216\u88AB\u5220\u4E86\u3002\u53BB Cloudflare \u65B0\u5EFA\u4E00\u679A\uFF08\u53EA\u7ED9 Workers Scripts \u6743\u9650\uFF0CRead \u548C Edit \u90FD\u52FE\uFF09\uFF0C\u66FF\u6362 Worker \u91CC\u7684 CF_API_TOKEN\u3002` + (hasAccountId ? "" : "\u5982\u679C\u5B83\u662F cfat_ \u5F00\u5934\u7684\u8D26\u53F7\u4EE4\u724C\uFF0C\u6362\u6210\u666E\u901A API Token\uFF0C\u6216\u8005\u7ED9 Worker \u52A0\u4E00\u6761 CF_ACCOUNT_ID\u3002");
 var OUTCOMES = /* @__PURE__ */ new Set(["updated", "up_to_date", "failed"]);
 var SOURCES = /* @__PURE__ */ new Set(["cron", "client", "manual"]);
 var parseAmsgSelfUpdateState = (raw) => {
